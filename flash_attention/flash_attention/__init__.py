@@ -8,8 +8,6 @@ from torch.utils.cpp_extension import load
 current_dir = Path(__file__).parent  # flash_attention/flash_attention/
 parent_dir = current_dir.parent       # flash_attention/
 
-# If you want to compile faster, you can manually indicate the CUDA version
-os.environ['TORCH_CUDA_ARCH_LIST'] = "12.8"
 
 try:
     flash_attention_cuda = load(
