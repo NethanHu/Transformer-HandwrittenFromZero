@@ -4,171 +4,153 @@
 #include <math.h>
 #include <float.h>
 
-// Tile sizes for block computation
-#define BLOCK_SIZE 32
-#define WARP_SIZE 32
+#define BLOCK_SIZE 64
+#define NUM_THREADS 256
 
-// Helper function for safe exponential
-__device__ inline float safe_exp(float x) {
-    // Clamp to prevent overflow
-    return expf(fminf(x, 88.0f));
-}
-
-// Flash Attention forward kernel
-// This implements the tiled attention computation to reduce HBM accesses
-template <int Br, int Bc>
-__global__ void flash_attention_forward_kernel(
-    const float* __restrict__ Q,    // Query matrix [N, d]
-    const float* __restrict__ K,    // Key matrix [N, d]
-    const float* __restrict__ V,    // Value matrix [N, d]
-    float* __restrict__ O,           // Output matrix [N, d]
-    const int N,                    // Sequence length
-    const int d,                    // Head dimension
-    const float scale               // Scaling factor (1/sqrt(d))
+// Optimized Flash Attention kernel - process all batches/heads in parallel
+__global__ void flash_attention_forward_kernel_optimized(
+    const float* __restrict__ Q,
+    const float* __restrict__ K,
+    const float* __restrict__ V,
+    float* __restrict__ O,
+    const int batch_size,
+    const int num_heads,
+    const int seq_len,
+    const int head_dim,
+    const float scale
 ) {
-    // Shared memory for tiles of Q, K, V
-    __shared__ float sQ[Br][BLOCK_SIZE];
-    __shared__ float sK[Bc][BLOCK_SIZE];
-    __shared__ float sV[Bc][BLOCK_SIZE];
-    __shared__ float sS[Br][Bc];  // Attention scores
+    // Grid: (batch_size * num_heads, seq_len / BLOCK_SIZE)
+    // Block: (NUM_THREADS)
 
-    // Thread and block indices
+    const int batch_head_idx = blockIdx.y;
+    const int block_row = blockIdx.x;
+
+    if (batch_head_idx >= batch_size * num_heads) return;
+
     const int tid = threadIdx.x;
-    const int bid = blockIdx.x;
+    const int row_start = block_row * BLOCK_SIZE;
 
-    // Row index for this block
-    const int row_start = bid * Br;
-    const int row_end = min(row_start + Br, N);
+    // Shared memory
+    extern __shared__ float shared_mem[];
+    float* s_scores = shared_mem;  // [BLOCK_SIZE, seq_len] for scores
 
-    // Local accumulators for this thread
-    float row_max[Br];
-    float row_sum[Br];
-    float acc[Br][BLOCK_SIZE];
+    // Offset to this batch/head
+    const int qkv_offset = batch_head_idx * seq_len * head_dim;
+    const float* Q_ptr = Q + qkv_offset;
+    const float* K_ptr = K + qkv_offset;
+    const float* V_ptr = V + qkv_offset;
+    float* O_ptr = O + qkv_offset;
 
-    // Initialize accumulators
-    for (int i = 0; i < Br; i++) {
-        row_max[i] = -FLT_MAX;
-        row_sum[i] = 0.0f;
-        for (int j = 0; j < BLOCK_SIZE; j++) {
-            acc[i][j] = 0.0f;
-        }
-    }
+    // Process BLOCK_SIZE rows at a time
+    for (int row = row_start + tid; row < min(row_start + BLOCK_SIZE, seq_len); row += NUM_THREADS) {
+        float row_max = -FLT_MAX;
+        float row_sum = 0.0f;
+        float acc[64] = {0.0f};  // Accumulator for this row (adjust size as needed)
 
-    // Number of tiles in K/V dimension
-    const int num_tiles = (N + Bc - 1) / Bc;
+        // Compute attention scores for this row
+        for (int col_block = 0; col_block < seq_len; col_block += BLOCK_SIZE) {
+            float block_max = -FLT_MAX;
 
-    // Loop over K,V tiles
-    for (int tile = 0; tile < num_tiles; tile++) {
-        const int col_start = tile * Bc;
-        const int col_end = min(col_start + Bc, N);
+            // Compute scores for current block
+            for (int col = col_block; col < min(col_block + BLOCK_SIZE, seq_len); col++) {
+                if (col > row) break;  // Causal mask
 
-        // Load Q tile (each thread loads multiple elements)
-        for (int i = 0; i < Br; i++) {
-            for (int j = tid; j < d; j += blockDim.x) {
-                if (row_start + i < N && j < d) {
-                    sQ[i][j] = Q[(row_start + i) * d + j];
-                } else {
-                    sQ[i][j] = 0.0f;
-                }
-            }
-        }
-
-        // Load K tile (transposed for coalesced access)
-        for (int i = 0; i < Bc; i++) {
-            for (int j = tid; j < d; j += blockDim.x) {
-                if (col_start + i < N && j < d) {
-                    sK[i][j] = K[(col_start + i) * d + j];
-                } else {
-                    sK[i][j] = 0.0f;
-                }
-            }
-        }
-
-        // Load V tile
-        for (int i = 0; i < Bc; i++) {
-            for (int j = tid; j < d; j += blockDim.x) {
-                if (col_start + i < N && j < d) {
-                    sV[i][j] = V[(col_start + i) * d + j];
-                } else {
-                    sV[i][j] = 0.0f;
-                }
-            }
-        }
-
-        __syncthreads();
-
-        // Compute attention scores S = Q @ K^T * scale
-        for (int i = 0; i < Br; i++) {
-            for (int j = tid; j < Bc; j += blockDim.x) {
                 float score = 0.0f;
-                if (row_start + i < N && col_start + j < N) {
-                    for (int k = 0; k < d; k++) {
-                        score += sQ[i][k] * sK[j][k];
-                    }
-                    score *= scale;
-
-                    // Causal mask: set future positions to -inf
-                    if (col_start + j > row_start + i) {
-                        score = -FLT_MAX;
-                    }
-                } else {
-                    score = -FLT_MAX;
+                // Dot product Q[row] @ K[col]
+                for (int d = 0; d < head_dim; d++) {
+                    score += Q_ptr[row * head_dim + d] * K_ptr[col * head_dim + d];
                 }
-                sS[i][j] = score;
+                score *= scale;
+
+                block_max = fmaxf(block_max, score);
+                s_scores[col] = score;
             }
+
+            // Online softmax update
+            float scale_factor = expf(row_max - block_max);
+            row_sum *= scale_factor;
+
+            // Update accumulator with scaled previous values
+            for (int d = 0; d < head_dim; d++) {
+                acc[d] *= scale_factor;
+            }
+
+            // Add new contributions
+            for (int col = col_block; col < min(col_block + BLOCK_SIZE, seq_len); col++) {
+                if (col > row) break;
+
+                float exp_score = expf(s_scores[col] - block_max);
+                row_sum += exp_score;
+
+                // Accumulate V weighted by score
+                for (int d = 0; d < head_dim; d++) {
+                    acc[d] += exp_score * V_ptr[col * head_dim + d];
+                }
+            }
+
+            row_max = block_max;
         }
 
-        __syncthreads();
-
-        // Online softmax and accumulation
-        for (int i = 0; i < Br; i++) {
-            if (row_start + i < N) {
-                // Find new maximum
-                float new_max = row_max[i];
-                for (int j = 0; j < Bc; j++) {
-                    if (col_start + j < N) {
-                        new_max = fmaxf(new_max, sS[i][j]);
-                    }
-                }
-
-                // Rescale previous accumulator
-                float scale_factor = safe_exp(row_max[i] - new_max);
-                row_sum[i] *= scale_factor;
-                for (int k = tid; k < d; k += blockDim.x) {
-                    acc[i][k] *= scale_factor;
-                }
-
-                // Compute exponentials and accumulate
-                for (int j = 0; j < Bc; j++) {
-                    if (col_start + j < N) {
-                        float exp_score = safe_exp(sS[i][j] - new_max);
-                        row_sum[i] += exp_score;
-
-                        // Accumulate weighted values
-                        for (int k = tid; k < d; k += blockDim.x) {
-                            acc[i][k] += exp_score * sV[j][k];
-                        }
-                    }
-                }
-
-                row_max[i] = new_max;
-            }
-        }
-
-        __syncthreads();
-    }
-
-    // Write output with normalization
-    for (int i = 0; i < Br; i++) {
-        if (row_start + i < N) {
-            for (int j = tid; j < d; j += blockDim.x) {
-                O[(row_start + i) * d + j] = acc[i][j] / row_sum[i];
-            }
+        // Write normalized output
+        for (int d = 0; d < head_dim; d++) {
+            O_ptr[row * head_dim + d] = acc[d] / row_sum;
         }
     }
 }
 
-// Wrapper function for Flash Attention forward
+// Much simpler and faster kernel for small sequences
+__global__ void flash_attention_simple_kernel(
+    const float* Q,
+    const float* K,
+    const float* V,
+    float* O,
+    const int total_tokens,  // batch_size * num_heads * seq_len
+    const int seq_len,
+    const int head_dim,
+    const float scale
+) {
+    const int token_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (token_idx >= total_tokens) return;
+
+    const int batch_head_idx = token_idx / seq_len;
+    const int row = token_idx % seq_len;
+
+    // Calculate offsets
+    const int matrix_offset = batch_head_idx * seq_len * head_dim;
+    const int row_offset = matrix_offset + row * head_dim;
+
+    // Compute attention scores and find max
+    float scores[1024];  // Assuming max seq_len = 1024
+    float max_score = -FLT_MAX;
+
+    for (int col = 0; col <= row; col++) {  // Causal mask
+        float score = 0.0f;
+        for (int d = 0; d < head_dim; d++) {
+            score += Q[row_offset + d] * K[matrix_offset + col * head_dim + d];
+        }
+        score *= scale;
+        scores[col] = score;
+        max_score = fmaxf(max_score, score);
+    }
+
+    // Compute softmax
+    float sum = 0.0f;
+    for (int col = 0; col <= row; col++) {
+        scores[col] = expf(scores[col] - max_score);
+        sum += scores[col];
+    }
+
+    // Compute output
+    for (int d = 0; d < head_dim; d++) {
+        float out = 0.0f;
+        for (int col = 0; col <= row; col++) {
+            out += scores[col] * V[matrix_offset + col * head_dim + d];
+        }
+        O[row_offset + d] = out / sum;
+    }
+}
+
+// Wrapper function
 torch::Tensor flash_attention_forward_cuda(
     torch::Tensor Q,
     torch::Tensor K,
@@ -176,7 +158,11 @@ torch::Tensor flash_attention_forward_cuda(
     float scale,
     bool causal
 ) {
-    // Get dimensions
+    // Ensure contiguous
+    Q = Q.contiguous();
+    K = K.contiguous();
+    V = V.contiguous();
+
     const int batch_size = Q.size(0);
     const int num_heads = Q.size(1);
     const int seq_len = Q.size(2);
@@ -187,35 +173,30 @@ torch::Tensor flash_attention_forward_cuda(
     K = K.view({batch_size * num_heads, seq_len, head_dim});
     V = V.view({batch_size * num_heads, seq_len, head_dim});
 
-    // Allocate output tensor
     auto O = torch::zeros_like(Q);
 
-    // Configure kernel launch
-    const int Br = 16;  // Block rows
-    const int Bc = 16;  // Block cols
-    const int threads = 32;
-    const int blocks = (seq_len + Br - 1) / Br;
+    // Use simple kernel for better performance
+    const int total_tokens = batch_size * num_heads * seq_len;
+    const int threads = 256;
+    const int blocks = (total_tokens + threads - 1) / threads;
 
-    // Launch kernel for each batch and head
-    for (int b = 0; b < batch_size * num_heads; b++) {
-        flash_attention_forward_kernel<Br, Bc><<<blocks, threads>>>(
-            Q[b].data_ptr<float>(),
-            K[b].data_ptr<float>(),
-            V[b].data_ptr<float>(),
-            O[b].data_ptr<float>(),
-            seq_len,
-            head_dim,
-            scale
-        );
-    }
+    flash_attention_simple_kernel<<<blocks, threads>>>(
+        Q.data_ptr<float>(),
+        K.data_ptr<float>(),
+        V.data_ptr<float>(),
+        O.data_ptr<float>(),
+        total_tokens,
+        seq_len,
+        head_dim,
+        scale
+    );
 
-    // Check for errors
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
         throw std::runtime_error("CUDA kernel failed: " + std::string(cudaGetErrorString(error)));
     }
 
-    // Reshape output back to [B, H, N, d]
+    // Reshape back
     O = O.view({batch_size, num_heads, seq_len, head_dim});
 
     return O;
