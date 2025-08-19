@@ -21,14 +21,15 @@ params = {
     'eval_iters': 20,
     'max_iters': 1000,
     'seed': 1024,
-    'saved_path': 'ckpt/model.pt'
+    'saved_path': './ckpt/model.pt',
+    'dataset_path': './data/tinystories.csv'
 }
 
 assert params['d_model'] % params['num_heads'] == 0, 'd_model must be divisible by num_heads!'
 
 torch.manual_seed(params['seed'])
 
-with open('data/tinystories.csv', 'r') as f:
+with open(params['dataset_path'], 'r') as f:
     text: str = f.read()
 
 tokenizer: Encoding = tiktoken.get_encoding('cl100k_base')

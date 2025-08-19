@@ -11,3 +11,7 @@ uv sync
 # 激活构建好的虚拟环境
 source .venv/bin/activate
 ```
+
+## Optimization
+### Flash Attention
+对于 Flash Attention 背后的数学原理在 [FlashAttentionDesc](./flash_attention/FlashAttentionDesc.md)这篇文章里面可以看到。

@@ -13,7 +13,7 @@ params = {
     'max_token_value': 100256,
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     'seed': 1024,
-    'saved_path': 'ckpt/model.pt'
+    'saved_path': './ckpt/model.pt'
 }
 
 SEED: int = 1024
