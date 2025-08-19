@@ -7,7 +7,6 @@
 #define BLOCK_SIZE 64
 #define NUM_THREADS 256
 
-// Optimized Flash Attention kernel - process all batches/heads in parallel
 __global__ void flash_attention_forward_kernel_optimized(
     const float* __restrict__ Q,
     const float* __restrict__ K,
@@ -155,8 +154,7 @@ torch::Tensor flash_attention_forward_cuda(
     torch::Tensor Q,
     torch::Tensor K,
     torch::Tensor V,
-    float scale,
-    bool causal
+    float scale
 ) {
     // Ensure contiguous
     Q = Q.contiguous();

@@ -14,4 +14,15 @@ source .venv/bin/activate
 
 ## Optimization
 ### Flash Attention
-对于 Flash Attention 背后的数学原理在 [FlashAttentionDesc](./flash_attention/FlashAttentionDesc.md)这篇文章里面可以看到。
+对于 Flash Attention 背后的数学原理在 [FlashAttentionDesc](./flash_attention/FlashAttentionDesc.md) 这篇文章里面可以看到。之后有一个使用 CUDA 实现的简单代码，
+没有在 SGEMM 矩阵乘法方面做优化，因此效率会比预期低很多。
+
+项目已经在 `pyproject.toml` 中配置好了包路径要求，但是编译环境依赖于 PyTorch Extension，因此必须使用 uv 同步环境，安装好 torch 依赖项。
+这里对实现好的 CUDA 代码提供了一种快速的 `JIT` 编译方法，运行方法如下：
+
+```bash
+# 运行脚本的时候会自动根据 __init__.py 中的要求编译源代码
+python3 flash_attention/simple_test.py
+```
+
+第一次运行的时候会花很多时间进行编译 Flash Attention，之后就会写进缓存中不再需要编译。

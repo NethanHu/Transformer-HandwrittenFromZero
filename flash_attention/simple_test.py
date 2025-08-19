@@ -20,7 +20,7 @@ class TransformerBlockWithFlash(nn.Module):
         self.norm1 = nn.LayerNorm(self.d_model)
         self.norm2 = nn.LayerNorm(self.d_model)
         self.Dropout = nn.Dropout(self.dropout)
-        self.attention = FlashAttention(d_model, n_heads, causal=True)
+        self.attention = FlashAttention(d_model, n_heads)
         self.ffn = nn.Sequential(
             nn.Linear(self.d_model, self.d_ff),
             nn.GELU(),
@@ -39,7 +39,7 @@ class TransformerBlockWithFlash(nn.Module):
 if __name__ == "__main__":
     d_model: int = 512
     model = TransformerBlockWithFlash(d_model=d_model, n_heads=16, dropout=0.1).cuda()
-    x = torch.randn(2, 1024, d_model).cuda()
+    x = torch.randn(16, 1024, d_model).cuda()
     output = model(x)
     print(f"Input shape: {x.shape}")
     print(f"Output shape: {output.shape}")

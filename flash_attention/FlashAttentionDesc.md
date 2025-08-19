@@ -4,7 +4,7 @@
 
 这是一个简单的流程展示：
 
-<img src="../assets/AttentionDesc.drawio.png" alt="AttentionDesc.drawio" style="zoom:50%;" />
+![AttentionDesc.drawio](../assets/AttentionDesc.drawio.png)
 
 思路其实不复杂，就是把原来需要大量 HBM IO 操作转移到了 L1 Cache（GPU中用的是SRAM）中。在 CUDA 编程那部分我们已经了解到 SRAM 的速度大约是 1-3 cycles（~3TB/s），而 HBM 的速度为上百 cycles。但是由于 L1 Cache 非常的小，通常只有 128KB、192KB，因此无法把大规模矩阵运算放入，因此 Flash Attention 进行了矩阵分块的乘法操作。
 
@@ -113,3 +113,26 @@ $$
 ## Flash Attention Fused Kernel 实现
 
 由于Flash Attention不是纯框架层面的优化，我们需要深入源码在系统层面去使用CUDA定制一个 [fused kernel](flash_attention/flash_attention_kernel.cu)。
+
+```c++
+torch::Tensor flash_attention_forward_cuda(
+    torch::Tensor Q,  // [B, H, N, d]
+    torch::Tensor K,  // [B, H, N, d]
+    torch::Tensor V,  // [B, H, N, d]
+    float scale       // 1 / sqrt(d)
+);
+```
+
+**参数解释**：
+> B: batch size <br>
+> H: attention heads 数 <br>
+> N: 序列长度（tokens） <br>
+> d: 每个 head 的维度（head_dim）<br>
+
+**返回值**:
+> O: 形如 [B, H, N, d] 的注意力输出
+
+**数值与掩码**:
+> 使用因果掩码（col <= row），即第 i 个 token 仅关注自身及其之前的 tokens <br>
+> softmax 前对分数做缩放：score *= scale，通常 scale = 1/sqrt(d) <br>
+> 采用数值稳定的 softmax（先取行最大值，再做指数与归一化）<br>
