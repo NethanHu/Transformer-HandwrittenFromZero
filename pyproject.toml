@@ -36,7 +36,8 @@ packages = [
     "kv_cache",
     "grouped_query_attention",
     "linear_attention",
-    "sparse_attention"
+    "sparse_attention",
+    "RoPE"
 ]
 
 [tool.setuptools.package-dir]

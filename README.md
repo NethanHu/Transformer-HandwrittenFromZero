@@ -87,4 +87,14 @@ python -m test.test_linear_attention
 python -m test.test_sparse_attentio
 ```
  
+### RoPE Position Encoding
+RoPE 是一种旋转位置编码方式，与传统的sin/cos编码的区别在于，它不在意全局的“GPS”坐标，而是更在于当前“相对位置”的token应该关注哪些上下文。
+核心数学原理：对于查询向量 $q $在位置 $m$，应用旋转: $f(q, m)$，对于键向量 $k$  在位置 $n$，应用旋转: $f(k, n)$，注意力分数: $f(q,m)\cdot f(k,n)$。
+由于旋转的性质，$f(q,m)\cdot f(k,n)>$ = $f(q,0)\cdot f(k,n-m)$，这意味着注意力分数只依赖于相对位置差 $(n-m)$，而不是绝对位置。
+
+![RoPE Rotation Visualization](https://miro.medium.com/v2/resize:fit:1400/1*VuGd8lEChtXR9svKiSFeZQ.gif)
+
+```bash
+python -m test.test_rope_encoding
+```
  
