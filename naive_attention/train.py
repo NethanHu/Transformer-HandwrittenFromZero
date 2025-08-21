@@ -7,8 +7,8 @@ from tiktoken.core import Encoding
 import torch
 
 params = {
-    'context_len': 256,  # constrain the word length of one input
-    'batch_size': 32,
+    'context_len': 128,  # constrain the word length of one input
+    'batch_size': 8,
     'd_model': 512,  # embedding size
     'learning_rate': 1e-3,
     'num_blocks': 16,
@@ -21,8 +21,8 @@ params = {
     'eval_iters': 20,
     'max_iters': 1000,
     'seed': 1024,
-    'saved_path': './ckpt/model.pt',
-    'dataset_path': './data/tinystories.csv'
+    'saved_path': './naive_attention/ckpt/model.pt',
+    'dataset_path': './naive_attention/data/tinystories.csv'
 }
 
 assert params['d_model'] % params['num_heads'] == 0, 'd_model must be divisible by num_heads!'

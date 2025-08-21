@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 from datasets import load_dataset
 
-data_file = Path("tinystories.csv")
+data_file = Path("./naive_attention/data/tinystories.csv")
 
 if not data_file.exists():
     # 1. Loading datasets from Hugging Face Hub
@@ -18,8 +18,7 @@ if not data_file.exists():
     df_single_column = df[['text']]
 
     # 4. Saved into single csv file
-    output_filename = 'tinystories.csv'
-    df_single_column.to_csv(output_filename, index=False, encoding='utf-8')
+    df_single_column.to_csv(data_file, index=False, encoding='utf-8')
 
 else:
     print(f"Reading file: {data_file}")

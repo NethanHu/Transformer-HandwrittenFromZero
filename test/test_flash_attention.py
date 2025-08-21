@@ -1,12 +1,14 @@
 import sys
 from pathlib import Path
 
+from flash_attention.flash_attention import FlashAttention
+
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import torch
 import torch.nn as nn
-from flash_attention import FlashAttention
+
 
 class TransformerBlockWithFlash(nn.Module):
     def __init__(self, d_model, n_heads, dropout=0.1):
@@ -43,3 +45,4 @@ if __name__ == "__main__":
     output = model(x)
     print(f"Input shape: {x.shape}")
     print(f"Output shape: {output.shape}")
+    print("Flash Attention test passed!")
