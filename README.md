@@ -23,7 +23,7 @@ python3 naive_attention/data/get_dataset.py
 ### Run the training script
 
 ```bash
-python3 naive_attention/train.py
+python naive_attention/train.py
 ```
 
 ## Optimization
@@ -57,6 +57,34 @@ python -m test.test_kv_cache
 GQA 让所有的 Head 之间共享同样的一份 K 和 V 矩阵（意味K和V的计算唯一），只让 Q 保留了原始多头的性质，从而大大减少 K 和 V 矩阵的参数量以及 
 KV Cache的显存占用，以此来达到提升推理速度，但是会带来精度上的损失。
 
+![Grouped-query Attention](https://klu.ai/_next/static/media/what-is-grouped-query-attention-gqa.32669ace.png)
+
 ```bash
-python -m test.test_gqa
+python -m test.test_grouped_query_attention
 ```
+
+### Linear Attention
+对于一个输入长度为 $n$ 的输入序列，当 $n$ 远大于特征长度 $d$ 时，矩阵乘法的时间复杂度约为 $O(n^2)$。
+Linear Attention 的最重要的改动是使用机器学习中的核函数的思想去掉了 Self-Attention 的 softmax，然后使用矩阵乘法的交换律先计算了
+$K^T$ 和 $V$ 的矩阵乘法，因此 Linear Attention 的时间复杂度和空间复杂度都是 $O(n^2)$。
+
+![Linear Attention](https://www.changjiangcai.com/mystudynotes/docs/auto-encoding/images/78_annotated-diffusion/linear-attention.png)
+
+```bash
+python -m test.test_linear_attention
+```
+
+
+### Sparse Attention
+稀疏注意力是一种降低部分精度但换来更优空间的一种做法。我们换一种角度思考 $Q\cdot K^T$ 在做什么：由于 $Q$ 和 $K$ 是同一个来源，
+所以相当于自己和自己全部内容做了全连接「计算」，当 `context_length` 很长的时候，这样的一个矩阵会变得巨大且低秩。因此传统的Transformer（也被
+称为Dense Attention）用的是全连接「计算」，这里的 Sparse Attention 是稀疏运算，但是会满足几个「采样」规则。
+
+![Dense Attention](https://1.bp.blogspot.com/-14Q0jUR7WJs/YFzbcnN5uAI/AAAAAAAAHW4/xeHY7wzVqWgl_CUzpz1nGLn1M8AscdyXgCLcBGAsYHQ/w640-h246/image5.png)
+![Sparse Attention](https://1.bp.blogspot.com/-a3OytXXOIQk/YFzckMQ-5TI/AAAAAAAAHXQ/nC_okT-GGCg2Rkhy4jIqh_csvUNd-NjYQCLcBGAsYHQ/w640-h278/image4.png)
+
+```bash
+python -m test.test_sparse_attentio
+```
+ 
+ 
