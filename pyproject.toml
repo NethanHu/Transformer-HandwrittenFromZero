@@ -37,7 +37,8 @@ packages = [
     "grouped_query_attention",
     "linear_attention",
     "sparse_attention",
-    "RoPE"
+    "RoPE",
+    "paged_attention"
 ]
 
 [tool.setuptools.package-dir]
