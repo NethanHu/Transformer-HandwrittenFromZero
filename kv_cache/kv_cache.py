@@ -34,7 +34,7 @@ class KVCache:
         # 用来记录当前批次里，每一个句子已经生成到第几个字，
         # 这样，在下一步更新缓存时，我们就知道应该把新的K、V向量写到哪个位置。
         self.seq_lens: torch.Tensor = torch.zeros(
-           max_batch_size, dtype=dtype, device=device
+            max_batch_size, dtype=torch.long, device=device  # 应该用整数类型
         )
 
     def update(
